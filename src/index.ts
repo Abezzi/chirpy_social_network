@@ -1,9 +1,25 @@
 import express from "express";
 import { Request, Response, NextFunction } from "express";
-import { apiConfig } from "./config.js";
+import { apiConfig, dbConfig } from "./config.js";
+import type { MigrationConfig } from "drizzle-orm/migrator";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+
+export type APIConfig = {
+  fileserverHits: number;
+};
+
+export type DBConfig = {
+  url: string;
+  migrationConfig: MigrationConfig
+};
 
 const app = express();
 const PORT = 8080;
+
+const migrationClient = postgres(dbConfig.url, { max: 1 });
+await migrate(drizzle(migrationClient), dbConfig.migrationConfig);
 
 app.use(express.json());
 
