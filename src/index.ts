@@ -7,6 +7,39 @@ const PORT = 8080;
 
 app.use(express.json());
 
+// custom error classes
+class BadRequestError extends Error {
+  statusCode = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = "BadRequestError";
+  }
+}
+
+class UnauthorizedError extends Error {
+  statusCode = 401;
+  constructor(message: string) {
+    super(message);
+    this.name = "UnauthorizedError";
+  }
+}
+
+class ForbiddenError extends Error {
+  statusCode = 403;
+  constructor(message: string) {
+    super(message);
+    this.name = "ForbiddenError";
+  }
+}
+
+class NotFoundError extends Error {
+  statusCode = 404;
+  constructor(message: string) {
+    super(message);
+    this.name = "NotFoundError";
+  }
+}
+
 const handlerReadiness = (_req: Request, res: Response) => {
   res.set("Content-Type", "text/plain");
   res.send("OK");
@@ -57,8 +90,7 @@ const handlerValidateChirp = (req: Request, res: Response) => {
     }
 
     if (body.length > 140) {
-      res.status(400).json({ error: "Chirp is too long" });
-      return;
+      throw new BadRequestError("Chirp is too long. Max length is 140");
     }
 
     // remove bad words
@@ -70,8 +102,34 @@ const handlerValidateChirp = (req: Request, res: Response) => {
 
     res.status(200).json({ cleanedBody });
   } catch (error) {
-    res.status(500).json({ error: "Something went wrong" });
+    throw error;
   }
+};
+
+const errorHandler = (err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  console.log(err);
+
+  if (err instanceof BadRequestError) {
+    res.status(400).json({ error: err.message });
+    return;
+  }
+  if (err instanceof UnauthorizedError) {
+    res.status(401).json({ error: err.message });
+    return;
+  }
+  if (err instanceof ForbiddenError) {
+    res.status(403).json({ error: err.message });
+    return;
+  }
+  if (err instanceof NotFoundError) {
+    res.status(404).json({ error: err.message });
+    return;
+  }
+
+  // fallback for unknown errors
+  res.status(500).json({
+    error: "Something went wrong on our end"
+  });
 };
 
 // start the server and listen for incoming connections on the specified port
@@ -96,5 +154,8 @@ app.get("/admin/metrics", handlerMetrics);
 app.post("/admin/reset", handlerReset);
 // check if the server is ready
 app.get("/api/healthz", handlerReadiness);
-// validate
+// validate chirp length
 app.post("/api/validate_chirp", handlerValidateChirp);
+
+// error handling middleware must be last
+app.use(errorHandler);
