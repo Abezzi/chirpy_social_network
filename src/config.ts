@@ -17,6 +17,7 @@ const migrationConfig: MigrationConfig = {
 
 export const apiConfig: APIConfig = {
   fileserverHits: 0,
+  platform: envOrThrow("PLATFORM"),
 };
 
 export const dbConfig: DBConfig = {

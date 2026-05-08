@@ -5,9 +5,12 @@ import type { MigrationConfig } from "drizzle-orm/migrator";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { createUser, deleteAllUsers } from "./db/queries/users.js";
+import { createChirp } from "./db/queries/chirps.js";
 
 export type APIConfig = {
   fileserverHits: number;
+  platform: string;
 };
 
 export type DBConfig = {
@@ -89,36 +92,74 @@ const handlerMetrics = (_req: Request, res: Response) => {
   );
 };
 
-const handlerReset = (_req: Request, res: Response) => {
+const handlerReset = async (_req: Request, res: Response) => {
+  if (apiConfig.platform !== "dev") {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+
   apiConfig.fileserverHits = 0;
+  await deleteAllUsers();
   res.set("Content-Type", "text/plain");
-  res.send(`Hits reset to 0`);
+  res.send(`hits reset to 0`);
 };
 
-const handlerValidateChirp = (req: Request, res: Response) => {
+const handlerCreateChirp = async (req: Request, res: Response) => {
   try {
-    const { body } = req.body;
-    const blackList = ["kerfuffle", "sharbert", "fornax"];
+    const { body, userId } = req.body;
 
     if (!body || typeof body !== "string") {
-      res.status(400).json({ error: "Chirp is required" });
+      res.status(400).json({ error: "body is required" });
       return;
     }
 
     if (body.length > 140) {
-      throw new BadRequestError("Chirp is too long. Max length is 140");
+      res.status(400).json({ error: "chirp is too long" });
+      return;
     }
 
-    // remove bad words
+    const blackList = ["kerfuffle", "sharbert", "fornax"];
     let cleanedBody = body;
     blackList.forEach(word => {
       const regex = new RegExp(`\\b${word}\\b`, "gi");
       cleanedBody = cleanedBody.replace(regex, "****");
     });
 
-    res.status(200).json({ cleanedBody });
+    if (!userId || typeof userId !== "string") {
+      res.status(400).json({ error: "userId is required" });
+      return;
+    }
+
+    const chirp = await createChirp({
+      body: cleanedBody,
+      userId,
+    });
+
+    res.status(201).json(chirp);
   } catch (error) {
-    throw error;
+    res.status(500).json({ error: "something went wrong" });
+  }
+};
+
+const handlerCreateUser = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || typeof email !== "string") {
+      res.status(400).json({ error: "email is required" });
+      return;
+    }
+
+    const user = await createUser({ email });
+
+    if (!user) {
+      res.status(400).json({ error: "user already exists" });
+      return;
+    }
+
+    res.status(201).json(user);
+  } catch (error) {
+    res.status(500).json({ error: "something went wrong" });
   }
 };
 
@@ -170,8 +211,11 @@ app.get("/admin/metrics", handlerMetrics);
 app.post("/admin/reset", handlerReset);
 // check if the server is ready
 app.get("/api/healthz", handlerReadiness);
-// validate chirp length
-app.post("/api/validate_chirp", handlerValidateChirp);
+// create users
+app.post("/api/users", handlerCreateUser);
+// create chirps
+app.post("/api/chirps", handlerCreateChirp);
+
 
 // error handling middleware must be last
 app.use(errorHandler);
