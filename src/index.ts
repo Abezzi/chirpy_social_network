@@ -6,7 +6,7 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createUser, deleteAllUsers } from "./db/queries/users.js";
-import { createChirp } from "./db/queries/chirps.js";
+import { createChirp, getAllChirps, getChirpById } from "./db/queries/chirps.js";
 
 export type APIConfig = {
   fileserverHits: number;
@@ -141,6 +141,42 @@ const handlerCreateChirp = async (req: Request, res: Response) => {
   }
 };
 
+
+const handlerGetChirps = async (_req: Request, res: Response) => {
+  try {
+    const chirps = await getAllChirps();
+    res.status(200).json(chirps);
+  } catch (error) {
+    res.status(500).json({ error: "something went wrong" });
+  }
+}
+
+const handlerGetChirp = async (req: Request, res: Response) => {
+  try {
+    const { chirpId } = req.params;
+
+    if (!chirpId) {
+      res.status(400).json({ error: "chirpId is required" });
+      return;
+    }
+
+    if (typeof chirpId !== "string") {
+      return;
+    }
+
+    const chirp = await getChirpById(chirpId);
+
+    if (!chirp) {
+      res.status(404).json({ error: "chirp not found" });
+      return;
+    }
+
+    res.status(200).json(chirp);
+  } catch (error) {
+    res.status(500).json({ error: "something went wrong" });
+  }
+}
+
 const handlerCreateUser = async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
@@ -215,6 +251,10 @@ app.get("/api/healthz", handlerReadiness);
 app.post("/api/users", handlerCreateUser);
 // create chirps
 app.post("/api/chirps", handlerCreateChirp);
+// get all chirps
+app.get("/api/chirps", handlerGetChirps);
+// get a single chirp
+app.get("/api/chirps/:chirpId", handlerGetChirp);
 
 
 // error handling middleware must be last
