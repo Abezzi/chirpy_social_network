@@ -5,8 +5,8 @@ import type { MigrationConfig } from "drizzle-orm/migrator";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { createUser, deleteAllUsers, getUserByEmail } from "./db/queries/users.js";
-import { createChirp, getAllChirps, getChirpById } from "./db/queries/chirps.js";
+import { createUser, deleteAllUsers, getUserByEmail, updateUsers } from "./db/queries/users.js";
+import { createChirp, deleteChirp, getAllChirps, getChirpById, getChirpByUserId } from "./db/queries/chirps.js";
 import { User } from "./db/schema.js";
 import { checkPasswordHash, getBearerToken, hashPassword, makeJWT, validateJWT } from "./auth.js";
 import { createRefreshToken, getUserFromRefreshToken, revokeRefreshToken } from "./db/queries/tokens.js";
@@ -143,7 +143,13 @@ const handlerCreateChirp = async (req: Request, res: Response) => {
       userId: userID,
     });
 
-    res.status(201).json({ chirp, userId: userID });
+    res.status(201).json({
+      id: chirp.id,
+      body: chirp.body,
+      createdAt: chirp.createdAt,
+      updatedAt: chirp.updatedAt,
+      userId: userID
+    });
   } catch (error: any) {
     if (error.message.includes("invalid") || error.message.includes("no authorization")) {
       res.status(401).json({ error: "invalid token" });
@@ -303,6 +309,86 @@ const handlerRevoke = async (req: Request, res: Response) => {
   }
 };
 
+const handlerUpdateUser = async (req: Request, res: Response) => {
+  try {
+    const token = getBearerToken(req);
+    const userID = validateJWT(token, apiConfig.jwtSecret);
+
+    const { email, password } = req.body;
+
+    if (!email || typeof email !== "string") {
+      res.status(400).json({ error: "email is required" });
+      return;
+    }
+
+    if (!password || typeof password !== "string") {
+      res.status(400).json({ error: "password is required" });
+      return;
+    }
+
+    const hashedPassword = await hashPassword(password);
+
+    // update only the authenticated user
+    const updatedUser = await updateUsers(email, hashedPassword, userID)
+
+    if (!updatedUser) {
+      res.status(404).json({ error: "user not found" });
+      return;
+    }
+
+    res.status(200).json({
+      id: updatedUser.id,
+      email: updatedUser.email,
+      createdAt: updatedUser.createdAt,
+      updatedAt: updatedUser.updatedAt
+    });
+  } catch (error: any) {
+    if (error.message.includes("invalid") || error.message.includes("no authorization")) {
+      res.status(401).json({ error: "invalid token" });
+      return;
+    }
+    res.status(500).json({ error: "something went wrong" });
+  }
+};
+
+const handlerDeleteChirp = async (req: Request, res: Response) => {
+  try {
+    const token = getBearerToken(req);
+    const userID = validateJWT(token, apiConfig.jwtSecret);
+
+    const chirpId = req.params.chirpId;
+
+    if (!chirpId || typeof chirpId !== "string") {
+      res.status(400).json({ error: "chirp id is required" });
+      return;
+    }
+
+    // check if chirp exists and belongs to the user
+    const chirp = await getChirpByUserId(chirpId);
+
+    if (!chirp) {
+      res.status(404).json({ error: "chirp not found" });
+      return;
+    }
+
+    if (chirp.userId !== userID) {
+      res.status(403).json({ error: "you can only delete your own chirps" });
+      return;
+    }
+
+    // delete the chirp
+    await deleteChirp(chirpId)
+    res.status(204).end();
+  } catch (error: any) {
+    if (error.message?.includes("invalid") || error.message?.includes("authorization")) {
+      res.status(401).json({ error: "invalid token" });
+      return;
+    }
+    console.error(error);
+    res.status(500).json({ error: "something went wrong" });
+  }
+};
+
 // start the server and listen for incoming connections on the specified port
 app.listen(PORT, () => {
   console.log(`Server is running at http://localhost:${PORT}`);
@@ -327,6 +413,8 @@ app.post("/admin/reset", handlerReset);
 app.get("/api/healthz", handlerReadiness);
 // create users
 app.post("/api/users", handlerCreateUser);
+// update user
+app.put("/api/users", handlerUpdateUser);
 // login
 app.post("/api/login", handlerLogin);
 // create chirps
@@ -335,6 +423,9 @@ app.post("/api/chirps", handlerCreateChirp);
 app.get("/api/chirps", handlerGetChirps);
 // get a single chirp
 app.get("/api/chirps/:chirpId", handlerGetChirp);
+// delete chirp
+app.delete("/api/chirps/:chirpId", handlerDeleteChirp);
+
 app.post("/api/refresh", handlerRefresh);
 app.post("/api/revoke", handlerRevoke);
 
