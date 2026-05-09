@@ -29,6 +29,13 @@
       "when": 1778343328478,
       "tag": "0003_mature_yellow_claw",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778346401685,
+      "tag": "0004_warm_starfox",
+      "breakpoints": true
     }
   ]
 }

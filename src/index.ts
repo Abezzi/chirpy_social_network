@@ -5,7 +5,7 @@ import type { MigrationConfig } from "drizzle-orm/migrator";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { createUser, deleteAllUsers, getUserByEmail, updateUsers } from "./db/queries/users.js";
+import { createUser, deleteAllUsers, getUserByEmail, updateUsers, upgradeToChirpyRed } from "./db/queries/users.js";
 import { createChirp, deleteChirp, getAllChirps, getChirpById, getChirpByUserId } from "./db/queries/chirps.js";
 import { User } from "./db/schema.js";
 import { checkPasswordHash, getBearerToken, hashPassword, makeJWT, validateJWT } from "./auth.js";
@@ -246,9 +246,13 @@ const handlerLogin = async (req: Request, res: Response) => {
     const { hashedPassword, ...response } = userResponse;
 
     res.status(200).json({
-      response,
+      id: response.id,
+      createdAt: response.createdAt,
+      updatedAt: response.updatedAt,
+      email: response.email,
       token: accessToken,
-      refreshToken: refreshRecord.token
+      refreshToken: refreshRecord.token,
+      isChirpyRed: response.isChirpyRed
     });
   } catch (error) {
     res.status(401).json({ error: "incorrect email or password" });
@@ -340,7 +344,8 @@ const handlerUpdateUser = async (req: Request, res: Response) => {
       id: updatedUser.id,
       email: updatedUser.email,
       createdAt: updatedUser.createdAt,
-      updatedAt: updatedUser.updatedAt
+      updatedAt: updatedUser.updatedAt,
+      isChirpyRed: updatedUser.isChirpyRed
     });
   } catch (error: any) {
     if (error.message.includes("invalid") || error.message.includes("no authorization")) {
@@ -389,6 +394,35 @@ const handlerDeleteChirp = async (req: Request, res: Response) => {
   }
 };
 
+const handlerPolkaWebhook = async (req: Request, res: Response) => {
+  try {
+    const { event, data } = req.body;
+
+    // ignore any event that is not user.upgraded
+    if (event !== "user.upgraded") {
+      res.status(204).end();
+      return;
+    }
+
+    if (!data?.userId) {
+      res.status(400).json({ error: "userId is required" });
+      return;
+    }
+
+    const updatedUser = await upgradeToChirpyRed(data.userId);
+
+    if (!updatedUser) {
+      res.status(404).json({ error: "user not found" });
+      return;
+    }
+
+    res.status(204).end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "something went wrong" });
+  }
+};
+
 // start the server and listen for incoming connections on the specified port
 app.listen(PORT, () => {
   console.log(`Server is running at http://localhost:${PORT}`);
@@ -425,10 +459,12 @@ app.get("/api/chirps", handlerGetChirps);
 app.get("/api/chirps/:chirpId", handlerGetChirp);
 // delete chirp
 app.delete("/api/chirps/:chirpId", handlerDeleteChirp);
-
+// refresh token
 app.post("/api/refresh", handlerRefresh);
+// revoke the refresh token
 app.post("/api/revoke", handlerRevoke);
-
+// webhook
+app.post("/api/polka/webhooks", handlerPolkaWebhook);
 
 // error handling middleware must be last
 app.use(errorHandler);
