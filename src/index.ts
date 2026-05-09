@@ -6,15 +6,16 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createUser, deleteAllUsers, getUserByEmail, updateUsers, upgradeToChirpyRed } from "./db/queries/users.js";
-import { createChirp, deleteChirp, getAllChirps, getChirpById, getChirpByUserId } from "./db/queries/chirps.js";
+import { createChirp, deleteChirp, getChirpById, getChirpByUserId, getChirps } from "./db/queries/chirps.js";
 import { User } from "./db/schema.js";
-import { checkPasswordHash, getBearerToken, hashPassword, makeJWT, validateJWT } from "./auth.js";
+import { checkPasswordHash, getAPIKey, getBearerToken, hashPassword, makeJWT, validateJWT } from "./auth.js";
 import { createRefreshToken, getUserFromRefreshToken, revokeRefreshToken } from "./db/queries/tokens.js";
 
 export type APIConfig = {
   fileserverHits: number;
   platform: string;
   jwtSecret: string;
+  polkaKey: string;
 };
 
 export type DBConfig = {
@@ -160,9 +161,23 @@ const handlerCreateChirp = async (req: Request, res: Response) => {
 };
 
 
-const handlerGetChirps = async (_req: Request, res: Response) => {
+const handlerGetChirps = async (req: Request, res: Response) => {
   try {
-    const chirps = await getAllChirps();
+    const authorId = req.query.authorId as string | undefined;
+    const sort = (req.query.sort as string | undefined) || "asc";
+    const chirps = await getChirps(authorId);
+
+    // sort
+    chirps.sort((a, b) => {
+      const dateA = new Date(a.createdAt).getTime();
+      const dateB = new Date(b.createdAt).getTime();
+
+      if (sort === "desc") {
+        return dateB - dateA;
+      }
+      // default to asc
+      return dateA - dateB;
+    });
     res.status(200).json(chirps);
   } catch (error) {
     res.status(500).json({ error: "something went wrong" });
@@ -397,6 +412,12 @@ const handlerDeleteChirp = async (req: Request, res: Response) => {
 const handlerPolkaWebhook = async (req: Request, res: Response) => {
   try {
     const { event, data } = req.body;
+    const apiKey = getAPIKey(req);
+
+    if (apiKey !== apiConfig.polkaKey) {
+      res.status(401).json({ error: "invalid API key" });
+      return;
+    }
 
     // ignore any event that is not user.upgraded
     if (event !== "user.upgraded") {
@@ -417,7 +438,11 @@ const handlerPolkaWebhook = async (req: Request, res: Response) => {
     }
 
     res.status(204).end();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.message?.includes("authorization") || error.message?.includes("invalid")) {
+      res.status(401).json({ error: "invalid api key" });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: "something went wrong" });
   }
