@@ -5,8 +5,10 @@ import type { MigrationConfig } from "drizzle-orm/migrator";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { createUser, deleteAllUsers } from "./db/queries/users.js";
+import { createUser, deleteAllUsers, getUserByEmail } from "./db/queries/users.js";
 import { createChirp, getAllChirps, getChirpById } from "./db/queries/chirps.js";
+import { User } from "./db/schema.js";
+import { checkPasswordHash, hashPassword } from "./auth.js";
 
 export type APIConfig = {
   fileserverHits: number;
@@ -17,6 +19,8 @@ export type DBConfig = {
   url: string;
   migrationConfig: MigrationConfig
 };
+
+type UserResponse = Omit<User, 'hashed_password'>;
 
 const app = express();
 const PORT = 8080;
@@ -179,23 +183,53 @@ const handlerGetChirp = async (req: Request, res: Response) => {
 
 const handlerCreateUser = async (req: Request, res: Response) => {
   try {
-    const { email } = req.body;
+    const { password, email } = req.body;
 
-    if (!email || typeof email !== "string") {
-      res.status(400).json({ error: "email is required" });
+    if (!email || typeof email !== "string" || !password || typeof password !== "string") {
+      res.status(400).json({ error: "email and password are required" });
       return;
     }
 
-    const user = await createUser({ email });
+    const hashedPasswordHandler = await hashPassword(password);
+
+    const user = await createUser(email, hashedPasswordHandler);
+
+    const { hashedPassword, ...userResponse } = user;
 
     if (!user) {
       res.status(400).json({ error: "user already exists" });
       return;
     }
 
-    res.status(201).json(user);
+    res.status(201).json(userResponse);
   } catch (error) {
     res.status(500).json({ error: "something went wrong" });
+  }
+};
+
+const handlerLogin = async (req: Request, res: Response) => {
+  try {
+    const { password, email } = req.body;
+
+    if (!password || !email) {
+      res.status(400).json({ error: "password and email are required" });
+      return;
+    }
+
+    const user = await getUserByEmail(email);
+
+    if (!user || !(await checkPasswordHash(password, user.hashedPassword))) {
+      res.status(401).json({ error: "incorrect email or password" });
+      return;
+    }
+
+    // return without password
+    const userResponse: UserResponse = user
+    const { hashedPassword, ...response } = userResponse;
+
+    res.status(200).json(response);
+  } catch (error) {
+    res.status(401).json({ error: "incorrect email or password" });
   }
 };
 
@@ -249,6 +283,8 @@ app.post("/admin/reset", handlerReset);
 app.get("/api/healthz", handlerReadiness);
 // create users
 app.post("/api/users", handlerCreateUser);
+// login
+app.post("/api/login", handlerLogin);
 // create chirps
 app.post("/api/chirps", handlerCreateChirp);
 // get all chirps
