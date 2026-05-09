@@ -2,8 +2,6 @@
 
 A full-featured social media backend built with **TypeScript** and **Express.js** as part of the Boot.dev "HTTP Servers" course.
 
-![Chirpy](https://via.placeholder.com/800x200/4f46e5/ffffff?text=CHIRPY)
-
 ## Features
 
 ### Authentication & Security
