@@ -9,6 +9,7 @@ import { createUser, deleteAllUsers, getUserByEmail } from "./db/queries/users.j
 import { createChirp, getAllChirps, getChirpById } from "./db/queries/chirps.js";
 import { User } from "./db/schema.js";
 import { checkPasswordHash, getBearerToken, hashPassword, makeJWT, validateJWT } from "./auth.js";
+import { createRefreshToken, getUserFromRefreshToken, revokeRefreshToken } from "./db/queries/tokens.js";
 
 export type APIConfig = {
   fileserverHits: number;
@@ -143,7 +144,11 @@ const handlerCreateChirp = async (req: Request, res: Response) => {
     });
 
     res.status(201).json({ chirp, userId: userID });
-  } catch (error) {
+  } catch (error: any) {
+    if (error.message.includes("invalid") || error.message.includes("no authorization")) {
+      res.status(401).json({ error: "invalid token" });
+      return;
+    }
     res.status(500).json({ error: "something went wrong" });
   }
 };
@@ -212,7 +217,7 @@ const handlerCreateUser = async (req: Request, res: Response) => {
 
 const handlerLogin = async (req: Request, res: Response) => {
   try {
-    const { password, email, expiresInSeconds } = req.body;
+    const { password, email } = req.body;
 
     if (!password || !email) {
       res.status(400).json({ error: "password and email are required" });
@@ -227,18 +232,18 @@ const handlerLogin = async (req: Request, res: Response) => {
     }
 
     // 1 hour default
-    let expiresIn = 3600;
-    if (typeof expiresInSeconds === "number" && expiresInSeconds > 0) {
-      expiresIn = Math.min(expiresInSeconds, 3600);
-    }
-
-    const token = makeJWT(user.id, expiresIn, apiConfig.jwtSecret);
+    const accessToken = makeJWT(user.id, 3600, apiConfig.jwtSecret);
+    const refreshRecord = await createRefreshToken(user.id);
 
     // return without password
     const userResponse: UserResponse = user
     const { hashedPassword, ...response } = userResponse;
 
-    res.status(200).json({ response, token: token });
+    res.status(200).json({
+      response,
+      token: accessToken,
+      refreshToken: refreshRecord.token
+    });
   } catch (error) {
     res.status(401).json({ error: "incorrect email or password" });
   }
@@ -268,6 +273,34 @@ const errorHandler = (err: Error, _req: Request, res: Response, _next: NextFunct
   res.status(500).json({
     error: "Something went wrong on our end"
   });
+};
+
+const handlerRefresh = async (req: Request, res: Response) => {
+  try {
+    const refreshTokenStr = getBearerToken(req);
+    const userID = await getUserFromRefreshToken(refreshTokenStr);
+
+    if (!userID) {
+      res.status(401).json({ error: "invalid refresh token" });
+      return;
+    }
+
+    const newAccessToken = makeJWT(userID, 3600, apiConfig.jwtSecret);
+
+    res.status(200).json({ token: newAccessToken });
+  } catch (error: any) {
+    res.status(401).json({ error: "invalid refresh token" });
+  }
+};
+
+const handlerRevoke = async (req: Request, res: Response) => {
+  try {
+    const refreshTokenStr = getBearerToken(req);
+    await revokeRefreshToken(refreshTokenStr);
+    res.status(204).end();
+  } catch (error) {
+    res.status(401).json({ error: "invalid refresh token" });
+  }
 };
 
 // start the server and listen for incoming connections on the specified port
@@ -302,6 +335,8 @@ app.post("/api/chirps", handlerCreateChirp);
 app.get("/api/chirps", handlerGetChirps);
 // get a single chirp
 app.get("/api/chirps/:chirpId", handlerGetChirp);
+app.post("/api/refresh", handlerRefresh);
+app.post("/api/revoke", handlerRevoke);
 
 
 // error handling middleware must be last
