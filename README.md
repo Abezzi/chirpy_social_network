@@ -62,6 +62,7 @@ A full-featured social media backend built with **TypeScript** and **Express.js*
 
 ## Project Structure
 
+```
 ├── src/
 │   ├── index.ts          # Main server file
 │   ├── auth.ts           # Auth utilities (JWT, tokens, etc.)
@@ -71,6 +72,7 @@ A full-featured social media backend built with **TypeScript** and **Express.js*
 ├── .env                  # Environment variables
 ├── drizzle/              # Migrations
 └── package.json
+```
 
 ## Getting Started
 
