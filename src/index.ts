@@ -8,11 +8,12 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createUser, deleteAllUsers, getUserByEmail } from "./db/queries/users.js";
 import { createChirp, getAllChirps, getChirpById } from "./db/queries/chirps.js";
 import { User } from "./db/schema.js";
-import { checkPasswordHash, hashPassword } from "./auth.js";
+import { checkPasswordHash, getBearerToken, hashPassword, makeJWT, validateJWT } from "./auth.js";
 
 export type APIConfig = {
   fileserverHits: number;
   platform: string;
+  jwtSecret: string;
 };
 
 export type DBConfig = {
@@ -110,7 +111,9 @@ const handlerReset = async (_req: Request, res: Response) => {
 
 const handlerCreateChirp = async (req: Request, res: Response) => {
   try {
-    const { body, userId } = req.body;
+    const token = getBearerToken(req);
+    const userID = validateJWT(token, apiConfig.jwtSecret);
+    const { body } = req.body;
 
     if (!body || typeof body !== "string") {
       res.status(400).json({ error: "body is required" });
@@ -129,17 +132,17 @@ const handlerCreateChirp = async (req: Request, res: Response) => {
       cleanedBody = cleanedBody.replace(regex, "****");
     });
 
-    if (!userId || typeof userId !== "string") {
+    if (!userID || typeof userID !== "string") {
       res.status(400).json({ error: "userId is required" });
       return;
     }
 
     const chirp = await createChirp({
       body: cleanedBody,
-      userId,
+      userId: userID,
     });
 
-    res.status(201).json(chirp);
+    res.status(201).json({ chirp, userId: userID });
   } catch (error) {
     res.status(500).json({ error: "something went wrong" });
   }
@@ -209,7 +212,7 @@ const handlerCreateUser = async (req: Request, res: Response) => {
 
 const handlerLogin = async (req: Request, res: Response) => {
   try {
-    const { password, email } = req.body;
+    const { password, email, expiresInSeconds } = req.body;
 
     if (!password || !email) {
       res.status(400).json({ error: "password and email are required" });
@@ -223,11 +226,19 @@ const handlerLogin = async (req: Request, res: Response) => {
       return;
     }
 
+    // 1 hour default
+    let expiresIn = 3600;
+    if (typeof expiresInSeconds === "number" && expiresInSeconds > 0) {
+      expiresIn = Math.min(expiresInSeconds, 3600);
+    }
+
+    const token = makeJWT(user.id, expiresIn, apiConfig.jwtSecret);
+
     // return without password
     const userResponse: UserResponse = user
     const { hashedPassword, ...response } = userResponse;
 
-    res.status(200).json(response);
+    res.status(200).json({ response, token: token });
   } catch (error) {
     res.status(401).json({ error: "incorrect email or password" });
   }

@@ -18,6 +18,7 @@ const migrationConfig: MigrationConfig = {
 export const apiConfig: APIConfig = {
   fileserverHits: 0,
   platform: envOrThrow("PLATFORM"),
+  jwtSecret: envOrThrow("JWT_SECRET")
 };
 
 export const dbConfig: DBConfig = {
